@@ -42,6 +42,8 @@ void usage(char* program_name)
 typedef struct shared{
     pthread_barrier_t barrier;
     pthread_mutex_t keyboards[MAX_KEYBOARDS*MAX_KEYS];
+    int find_dead;
+    pthread_mutex_t find_dead_mutex;
 }shared_t;
 
 void ms_sleep(unsigned int milli)
@@ -95,11 +97,28 @@ void child_work(int m, shared_t* shared, int k){
 
 
     int ran;
-    for(int i = 0; i < 10; i++){
+    for(;1;){
+        pthread_mutex_lock(&shared->find_dead_mutex);
+        if(shared->find_dead == 1){
+            pthread_mutex_unlock(&shared->find_dead_mutex);
+            break;
+        }
+        pthread_mutex_unlock(&shared->find_dead_mutex);
         ran = rand()%(m*k);
         sem_wait(sem_arr[ran%m]);
         ms_sleep(300);
-        pthread_mutex_lock(&shared->keyboards[ran]);
+        if(pthread_mutex_lock(&shared->keyboards[ran]) == EOWNERDEAD){
+            pthread_mutex_lock(&shared->find_dead_mutex);
+            shared->find_dead = 1;
+            printf("Student <%d>: someone is lying here, help!!!\n", getpid());
+            pthread_mutex_unlock(&shared->find_dead_mutex);
+            pthread_mutex_consistent(&shared->keyboards[ran]);
+        }
+        if(rand()%100 == 69){
+            printf("Student <%d>: I have no more strength!\n", getpid());
+            sem_post(sem_arr[ran%m]);
+            abort();
+        }
         shared_mem[ran] /= 3;
         pthread_mutex_unlock(&shared->keyboards[ran]);
         sem_post(sem_arr[ran%m]);
@@ -151,10 +170,14 @@ int main(int argc, char** argv) {
     pthread_mutexattr_t attr_mutex;
     pthread_mutexattr_init(&attr_mutex);
     pthread_mutexattr_setpshared(&attr_mutex, PTHREAD_PROCESS_SHARED);
+    pthread_mutexattr_setrobust(&attr_mutex, PTHREAD_MUTEX_ROBUST);
     for(int i = 0; i < m*k; i++){
         pthread_mutex_init(&shared->keyboards[i], &attr_mutex);
     }
+    pthread_mutex_init(&shared->find_dead_mutex, &attr_mutex);
     pthread_mutexattr_destroy(&attr_mutex);
+    shared->find_dead = 0;
+    
 
     for(int i = 0; i < n; i++){
         pid_t pid = fork();
