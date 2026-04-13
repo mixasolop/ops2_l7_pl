@@ -39,6 +39,10 @@ void usage(char* program_name)
     exit(EXIT_FAILURE);
 }
 
+typedef struct shared{
+    pthread_barrier_t barrier;
+}shared_t;
+
 void ms_sleep(unsigned int milli)
 {
     time_t sec = (int)(milli / 1000);
@@ -61,7 +65,10 @@ void print_keyboards_state(double* keyboards, int m, int k)
     }
 }
 
-void child_work(int m){
+void child_work(int m, shared_t* shared){
+
+    pthread_barrier_wait(&shared->barrier);
+
     char buff[20];
     srand(getpid());
     sem_t *sem_arr[MAX_KEYBOARDS];
@@ -106,14 +113,22 @@ int main(int argc, char** argv) {
     }
 
     char buff[20];
-    
+
 
     for(int i = 0; i < m; i++){
         snprintf(buff, sizeof(buff), "/sop-sem-%d", i);
         sem_unlink(buff);
     }
 
-
+    shared_t *shared = mmap(NULL, sizeof(shared_t), PROT_WRITE | PROT_READ, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if(shared == MAP_FAILED){
+        ERR("mmap");
+    }
+    pthread_barrierattr_t attr;
+    pthread_barrierattr_init(&attr);
+    pthread_barrierattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+    pthread_barrier_init(&shared->barrier, &attr, n+1);
+    pthread_barrierattr_destroy(&attr);
 
     for(int i = 0; i < n; i++){
         pid_t pid = fork();
@@ -121,10 +136,14 @@ int main(int argc, char** argv) {
             ERR("fork");
         }
         if(pid == 0){
-            child_work(m);
+            child_work(m, shared);
             exit(EXIT_SUCCESS);
         }
     }
+
+    ms_sleep(500);
+    pthread_barrier_wait(&shared->barrier);
+
     
 
     while(wait(NULL) > 0){}
@@ -133,5 +152,8 @@ int main(int argc, char** argv) {
         sem_unlink(buff);
     }
 
+
+
+    pthread_barrier_destroy(&shared->barrier);
     printf("Cleaning finished!\n");
 }
