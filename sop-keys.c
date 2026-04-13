@@ -97,6 +97,7 @@ void child_work(int m, shared_t* shared){
             ERR("sem_close");
         }
     }
+    munmap(shared, sizeof(shared_t));
 }
 
 int main(int argc, char** argv) { 
@@ -155,5 +156,6 @@ int main(int argc, char** argv) {
 
 
     pthread_barrier_destroy(&shared->barrier);
+    munmap(shared, sizeof(shared_t));
     printf("Cleaning finished!\n");
 }
